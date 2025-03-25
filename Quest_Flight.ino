@@ -38,11 +38,12 @@ Files Required to make a complete program -
 
 #include "Quest_Flight.h"
 #include "Quest_CLI.h"
-#include "AS726X.h"
+#include "Adafruit_AS726x.h"
+#include "TCA9548A.h"
+#include <Wire.h>
 
-AS726X sensor1;
-AS726X sensor2;
-
+TCA9548A I2CMux;
+Adafruit_AS726x ams;
 //////////////////////////////////////////////////////////////////////////
 //    This defines the timers used to control flight operations
 //////////////////////////////////////////////////////////////////////////
@@ -61,7 +62,7 @@ AS726X sensor2;
 //
 #define TimeEvent1_time     ((one_min * 60) / SpeedFactor)      //take a photo time
 #define Sensor1time         ((one_min * 15) / SpeedFactor)      //loop for pumping
-#define Sensor2time         ((one_sec * 20)  / SpeedFactor)     //loop for sensor readings
+#define Sensor2time         ((one_min * 15)  / SpeedFactor)     //loop for sensor readings
 //
   int sensor1count = 0;     //counter of times the sensor has been accessed
   int sensor2count = 0;     //counter of times the sensor has been accessed
@@ -96,6 +97,9 @@ void Flying() {
   int valvePin = IO6;
   int initialPump = 10000; //initalPumping time is miliseconds
   int loopPump = 5000; //pumping after intial in miliseconds
+  int endPump = 10000; //pumping ethanol
+  //buffer to hold raw values
+  uint16_t sensorValues[AS726x_NUM_CHANNELS];
   //bring up issue of broth sitting at edge of tube
 
   //turn sensors off
@@ -104,8 +108,14 @@ void Flying() {
   //
   //turn pump on, wait for growth medium to pump and turn off
   digitalWrite(pumpPin, HIGH);
-  delay(initialPump);
+  //delay(initialPump);
   digitalWrite(pumpPin, LOW);
+
+  pinMode(LED_BUILTIN, OUTPUT);
+  //multiplexer
+  Wire.begin();
+  I2CMux.begin(Wire);
+  I2CMux.closeAll();
   //******************************************************************
 
   //------------ flying -----------------------
@@ -253,68 +263,82 @@ void Flying() {
     if ((millis() - Sensor2Timer) > Sensor2time) {    //Is it time to read?
       Sensor2Timer = millis();                        //Yes, lets read the sensor1
       sensor2count++;
-      //
-      //  Here to calculate and store data
-      //
-      int Deadtime = millis()-Sensor2Deadmillis;      //time in millis sence last visit
-      Sensor2Deadmillis = millis();                   //set millis this visit
     
-      //reading on sensor1
-      //turn sensor 1 on
-      digitalWrite(sensor1Pin, HIGH);
+      // put your main code here, to run repeatedly:
+      I2CMux.openChannel(0);
+      ams.begin();
 
-      //intiailizing
-      sensor1.begin();
-      sensor1.takeMeasurements();
+      uint8_t temp = ams.readTemperature();
 
-      //output
-      Serial.print(" Reading 1: V[");
-      Serial.print(sensor.getCalibratedViolet(), 2);
-      Serial.print("] B[");
-      Serial.print(sensor.getCalibratedBlue(), 2);
-      Serial.print("] G[");
-      Serial.print(sensor.getCalibratedGreen(), 2);
-      Serial.print("] Y[");
-      Serial.print(sensor.getCalibratedYellow(), 2);
-      Serial.print("] O[");
-      Serial.print(sensor.getCalibratedOrange(), 2);
-      Serial.print("] R[");
-      Serial.print(sensor.getCalibratedRed(), 2);
-
-      //adding data to output
-      //add2text(sensor.getCalibratedViolet())
-      //compare getCalibrated to just get, get would be more convenient as integer
-
-      //turn sensor 1 off
-      digitalWrite(sensor1Pin, LOW);
-      //comment
-
-      //reading on sensor2
-      //turn sensor 2 on
-      digitalWrite(sensor2Pin, HIGH);
+      ams.drvOn(); //uncomment this if you want to use the driver LED for readings
+      ams.startMeasurement(); //begin a measurement
       
-      //initializing
-      sensor2.begin();
-      sensor2.takeMeasurements();
+      //wait till data is available
+      bool rdy = false;
+      while(!rdy){
+        delay(5);
+        rdy = ams.dataReady();
+      }
+      delay(2000);
+      ams.drvOff(); //uncomment this if you want to use the driver LED for readings
+      delay(2000);
+      //read the values!
+      ams.readRawValues(sensorValues);
+      //ams.readCalibratedValues(calibratedValues);
 
-      //output
-      Serial.print(" Reading: V[");
-      Serial.print(sensor.getCalibratedViolet(), 2);
-      Serial.print("] B[");
-      Serial.print(sensor.getCalibratedBlue(), 2);
-      Serial.print("] G[");
-      Serial.print(sensor.getCalibratedGreen(), 2);
-      Serial.print("] Y[");
-      Serial.print(sensor.getCalibratedYellow(), 2);
-      Serial.print("] O[");
-      Serial.print(sensor.getCalibratedOrange(), 2);
-      Serial.print("] R[");
-      Serial.print(sensor.getCalibratedRed(), 2);
+      Serial.print("Temp: "); Serial.print(temp);
+      Serial.print(" Violet: "); Serial.print(sensorValues[AS726x_VIOLET]);
+      Serial.print(" Blue: "); Serial.print(sensorValues[AS726x_BLUE]);
+      Serial.print(" Green: "); Serial.print(sensorValues[AS726x_GREEN]);
+      Serial.print(" Yellow: "); Serial.print(sensorValues[AS726x_YELLOW]);
+      Serial.print(" Orange: "); Serial.print(sensorValues[AS726x_ORANGE]);
+      Serial.print(" Red: "); Serial.print(sensorValues[AS726x_RED]);
+      Serial.println();
+      Serial.println();
 
-      //adding data to output
+      delay(3000);
 
-      //turn sensor 2 off
-      digitalWrite(sensor2Pin, LOW);
+      I2CMux.closeAll();
+
+      Serial.println("Switch");
+      delay(2000);
+
+      I2CMux.openChannel(1);
+      ams.begin();
+
+      temp = ams.readTemperature();
+
+      ams.drvOn(); //uncomment this if you want to use the driver LED for readings
+      ams.startMeasurement(); //begin a measurement
+      
+      //wait till data is available
+      rdy = false;
+      while(!rdy){
+        delay(5);
+        rdy = ams.dataReady();
+      }
+      delay(2000);
+      ams.drvOff(); //uncomment this if you want to use the driver LED for readings
+      delay(2000);
+      //read the values!
+      ams.readRawValues(sensorValues);
+      //ams.readCalibratedValues(calibratedValues);
+
+      Serial.print("Temp: "); Serial.print(temp);
+      Serial.print(" Violet: "); Serial.print(sensorValues[AS726x_VIOLET]);
+      Serial.print(" Blue: "); Serial.print(sensorValues[AS726x_BLUE]);
+      Serial.print(" Green: "); Serial.print(sensorValues[AS726x_GREEN]);
+      Serial.print(" Yellow: "); Serial.print(sensorValues[AS726x_YELLOW]);
+      Serial.print(" Orange: "); Serial.print(sensorValues[AS726x_ORANGE]);
+      Serial.print(" Red: "); Serial.print(sensorValues[AS726x_RED]);
+      Serial.println();
+      Serial.println();
+
+      delay(3000);
+
+      I2CMux.closeAll();
+
+      delay(200);
     }     // End of Sensor2Timer          
   }       // End of while 
 }         //End nof Flighting
